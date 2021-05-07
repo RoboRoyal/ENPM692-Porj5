@@ -7,9 +7,11 @@ import pygame
 import time
 from random import randint
 
-HEIGHT = 300
-WIDTH = 400
+GRAIN = 30
+HEIGHT = 10 * GRAIN
+WIDTH = 10 * GRAIN
 SCALE = 2
+SCALAR = GRAIN * SCALE
 
 board = None
 start = None
@@ -29,7 +31,7 @@ all_nodes = None
 path = []
 SQRT2 = math.sqrt(2)
 nodes = None
-MAX_SEPARATION = 40
+MAX_SEPARATION = 60
 
 BOT_RADIUS = 10
 OBSTACLE_CLEARANCE = 5
@@ -37,7 +39,7 @@ CLEARANCE = BOT_RADIUS + OBSTACLE_CLEARANCE
 
 THRESHOLD = 20
 itt = 0
-SLOW = True
+SLOW = False
 
 def update(node):
     global itt
@@ -96,83 +98,52 @@ def make_board():
     board.fill(WHITE)
 
     # easy
-    pygame.draw.circle(board, BLACK, [90 * SCALE, (HEIGHT - 70) * SCALE], 35 * SCALE)
-    pygame.draw.ellipse(board, BLACK, [186 * SCALE, (HEIGHT - 175) * SCALE, 120 * SCALE, 60 * SCALE], 0 * SCALE)
-
-    # Line Segment
-    pygame.draw.polygon(board, BLACK,
-                        [(48 * SCALE, (HEIGHT - 108) * SCALE), (37 * SCALE, (HEIGHT - 124) * SCALE),
-                         (159 * SCALE, (HEIGHT - 210) * SCALE), (170 * SCALE, (HEIGHT - 194) * SCALE)])
-
-    # C shape
-    pygame.draw.polygon(board, BLACK,  # back
-                        [(200 * SCALE, (HEIGHT - 270) * SCALE), (210 * SCALE, (HEIGHT - 270) * SCALE),
-                         (210 * SCALE, (HEIGHT - 240) * SCALE), (200 * SCALE, (HEIGHT - 240) * SCALE)])
-    pygame.draw.polygon(board, BLACK,  # top
-                        [(200 * SCALE, (HEIGHT - 280) * SCALE), (230 * SCALE, (HEIGHT - 280) * SCALE),
-                         (230 * SCALE, (HEIGHT - 270) * SCALE), (200 * SCALE, (HEIGHT - 270) * SCALE)])
-    pygame.draw.polygon(board, BLACK,  # bottom
-                        [(200 * SCALE, (HEIGHT - 240) * SCALE), (230 * SCALE, (HEIGHT - 240) * SCALE),
-                         (230 * SCALE, (HEIGHT - 230) * SCALE), (200 * SCALE, (HEIGHT - 230) * SCALE)])
-
-    # Polygon ---- whats the error allowed? lot of rounding and re-rounding
-    pygame.draw.polygon(board, BLACK,  # why is this so ugly
-                        [(354 * SCALE, (HEIGHT - 138) * SCALE), (380 * SCALE, (HEIGHT - 170) * SCALE),
-                         (380 * SCALE, (HEIGHT - 115) * SCALE), (328 * SCALE, (HEIGHT - 63) * SCALE),
-                         (286 * SCALE, (HEIGHT - 105) * SCALE), (325 * SCALE, (HEIGHT - 143) * SCALE)])
+    pygame.draw.circle(board, BLACK, [2 * SCALAR, (HEIGHT - 2 * GRAIN) * SCALE], 1 * SCALAR)
+    pygame.draw.circle(board, BLACK, [2 * SCALAR, (HEIGHT - 8 * GRAIN) * SCALE], 1 * SCALAR)
+    pygame.draw.rect(board, BLACK, pygame.Rect(
+        .25 * SCALAR, (HEIGHT - 5.75 * GRAIN) * SCALE, 1.5 * SCALAR, 1.5 * SCALAR))
+    pygame.draw.rect(board, BLACK, pygame.Rect(
+        3.75 * SCALAR, (HEIGHT - 5.75 * GRAIN) * SCALE, 2.5 * SCALAR, 1.5 * SCALAR))
+    pygame.draw.rect(board, BLACK, pygame.Rect(
+        7.25 * SCALAR, (HEIGHT - 4 * GRAIN) * SCALE, 1.5 * SCALAR, 2 * SCALAR))
 
 
-# check if point in circle
-def in_circle(x, y):
-    if math.pow(x - 90, 2) + math.pow(y - 70, 2) >= math.pow(35 + CLEARANCE, 2):
+def in_circle(x, y):  # check if point in lower circle
+    if math.pow(x - 2 * GRAIN, 2) + math.pow(y - (HEIGHT - 2 * GRAIN), 2) >= math.pow(1 * GRAIN + CLEARANCE, 2):
         return False
     return True
 
 
-# check if point in ellipse
-def in_ellipse(x, y):
-    center_x = 246
-    center_y = 146
-    horizontal_axis = 60 + CLEARANCE
-    vertical_axis = 30 + CLEARANCE
-    if ((math.pow(x - center_x, 2) / math.pow(horizontal_axis, 2)) +
-            (math.pow(y - center_y, 2) / math.pow(vertical_axis, 2))) <= 1:
+def in_circle_2(x, y):  # check if point in upper circle
+    if math.pow(x - 2 * GRAIN, 2) + math.pow(y - (HEIGHT - 8 * GRAIN) , 2) >= math.pow(1 * GRAIN + CLEARANCE, 2):
+        return False
+    return True
+
+
+def in_rect(x, y):    # check if point in rectangle
+    if .25 * GRAIN - CLEARANCE <= x <= 1.75 * GRAIN + CLEARANCE and \
+            5.75 * GRAIN + CLEARANCE >= y >= 4.25 * GRAIN - CLEARANCE:
         return True
     return False
 
 
-# check if point in C-shape
-def in_c_shape(x, y):
-    if (x >= 200 - CLEARANCE and x <= 210 + CLEARANCE and y <= 280 + CLEARANCE and y >= 230 - CLEARANCE) or \
-       (x >= 210 - CLEARANCE and x <= 230 + CLEARANCE and y >= 270 - CLEARANCE and y <= 280 + CLEARANCE) or \
-       (y >= 230 - CLEARANCE and y <= 240 + CLEARANCE and x >= 210 - CLEARANCE and x <= 230 + CLEARANCE):
+def in_rect_2(x, y):
+    if 3.75 * GRAIN - CLEARANCE <= x <= 6.25 * GRAIN + CLEARANCE and \
+            5.75 * GRAIN + CLEARANCE >= y >= 4.25 * GRAIN - CLEARANCE:
         return True
     return False
 
 
-# check if point in weird polygon
-def in_poly(x, y):
-    if ((y - 1 * x + 181.6 - CLEARANCE) < 0 and (y + 0.3 * x - 239.9 - CLEARANCE) < 0
-            and (y + 249.2 * x - 95054 - CLEARANCE) < 0 and (y - x + 265 + CLEARANCE) > 0
-            and (y + x - 389.3 + CLEARANCE) > 0) or ((y - 1.13 * x + 260.75 - CLEARANCE) < 0
-            and (y + 249.2 * x - 95054 - CLEARANCE) < 0 and (y + .3 * x - 240.6 + CLEARANCE) > 0):
+def in_rect_3(x, y):
+    if 7.25 * GRAIN - CLEARANCE <= x <= 8.75 * GRAIN + CLEARANCE and \
+            4 * GRAIN + CLEARANCE >= y >= 2 * GRAIN - CLEARANCE:
         return True
     return False
-
-
-# check if point in rotated rectangle
-def in_line_segment(x, y):
-    if (y + 1.4 * x - 176.5 + CLEARANCE) > 0 and (y - 0.7 * x - 74.4 + CLEARANCE) > 0 \
-            and (y - 0.7 * x - 98.8 - CLEARANCE) < 0 and (y + 1.4 * x - 438.1 - CLEARANCE) < 0:
-        return True
-    return False
-
 
 
 # check if point is in any obstacle
 def in_obstacle(x, y):
-    if in_circle(x, y) or in_ellipse(x, y) or in_c_shape(x, y) or \
-            in_line_segment(x, y) or in_poly(x, y):
+    if in_circle(x, y) or in_circle_2(x, y) or in_rect(x, y) or in_rect_2(x, y) or in_rect_3(x, y):
         return True
     return False
 
@@ -225,22 +196,6 @@ def get_initial_conditions(human=True):
         x1, y1 = random_point()
         x2, y2 = random_point()
     return Node(x1, y1, None), Node(x2, y2, None)
-
-
-# returns list of nodes of all valid neighbors
-def get_neighbors(parent):
-    neighbors = []
-    for i in range(-1, 2):
-        for j in range(-1, 2):
-            dist = SQRT2
-            if i == j == 0:
-                continue
-            if point_valid(parent.x + i, parent.y + j, False):
-                if i == 0 or j == 0:
-                    dist = 1
-                new_node = Node(parent.x + i, parent.y + j, parent, dist)
-                neighbors.append(new_node)
-    return neighbors
 
 
 
@@ -339,12 +294,12 @@ def hybrid_rrt(start, goal):
     s_g = full_optimise(s_g)
     draw_path(s_g, YELLOW)
     if SLOW:
-        time.sleep(3)
+        time.sleep(1)
     print("Optimise G to S")
     g_s = full_optimise(g_s)
     draw_path(g_s, MAGENTA)
     if SLOW:
-        time.sleep(3)
+        time.sleep(1)
     if path_length(s_g) < path_length(g_s):
         print("s_g")
         path = s_g
@@ -353,7 +308,7 @@ def hybrid_rrt(start, goal):
         path = g_s
     draw_path(path, BLACK)
     if SLOW:
-        time.sleep(2.5)
+        time.sleep(1.5)
     return path
 
 # work back from target to get path to start

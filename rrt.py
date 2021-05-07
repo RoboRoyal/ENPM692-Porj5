@@ -5,7 +5,9 @@
 import math
 import pygame
 import time
+import random
 from random import randint
+random.seed(1234)
 
 GRAIN = 30
 HEIGHT = 10 * GRAIN
@@ -39,7 +41,8 @@ CLEARANCE = BOT_RADIUS + OBSTACLE_CLEARANCE
 
 THRESHOLD = 20
 itt = 0
-SLOW = True
+SLOW = False
+
 
 def update(node):
     global itt
@@ -48,6 +51,7 @@ def update(node):
         pygame.display.update()
         pygame.event.get()
     itt += 1
+
 
 # distance between two points
 def distance(x1,y1,x2,y2):
@@ -72,9 +76,6 @@ class Node:
         if not self.parent:
             return 0
         return distance(self.x, self.y, self.parent.x, self.parent.y)
-
-    def heuristic(self):  # a* heuristic
-        return distance(self.x, self.y, target.x, target.y) + self.g
 
     def __eq__(self, other):
         return self.x == other.x and self.y == other.y
@@ -196,7 +197,6 @@ def get_initial_conditions(human=True):
         x1, y1 = random_point()
         x2, y2 = random_point()
     return Node(x1, y1, None), Node(x2, y2, None)
-
 
 
 def valid_line(x1,y1,x2,y2):
@@ -339,9 +339,7 @@ def add_points(p = path):
     draw_point_with_threshold(target, RED)
     pygame.display.update()
 
-    draw_path(p)
-    draw_point_with_threshold(start)
-    draw_point_with_threshold(target, RED)
+    draw_path(p, MAGENTA)
     pygame.display.update()
     # print("Path: ", len(p))
 
@@ -359,9 +357,21 @@ def get_points_in_line(x1, y1, x2, y2):
                 points.append([x, y])
     return points
 
+def sanity_check():
+    for run in range(1000):
+        point = random_point()
+        if point_valid(point[0], point[1]):
+            pygame.draw.circle(board, RED, (point[0] * SCALE, HEIGHT * SCALE - point[1] * SCALE), 1)
+        else:
+            pass
+            #pygame.draw.circle(board, GREEN, point, 1)
+        pygame.display.update(     )
+        pygame.event.get()
+
+
 if __name__ == "__main__":
     #start, target = get_initial_conditions(False)
-    start = Node(16, 16, None)
+    start = Node(120, 40, None)
     target = Node(250, 250, None)
     print("Finding path...")
     real_time = True
@@ -369,7 +379,7 @@ if __name__ == "__main__":
     if real_time:
         make_board()
         add_points()
-
+    # sanity_check()
     # RRT(start, target)
     # duel_rrt(start, target)
     path = hybrid_rrt(start, target)

@@ -31,7 +31,7 @@ all_nodes = None
 path = []
 SQRT2 = math.sqrt(2)
 nodes = None
-MAX_SEPARATION = 60
+MAX_SEPARATION = 30
 
 BOT_RADIUS = 10
 OBSTACLE_CLEARANCE = 5
@@ -39,7 +39,7 @@ CLEARANCE = BOT_RADIUS + OBSTACLE_CLEARANCE
 
 THRESHOLD = 20
 itt = 0
-SLOW = False
+SLOW = True
 
 def update(node):
     global itt
@@ -152,11 +152,11 @@ def is_close(x, y, x_target, y_target):
 
 # check if point inside boundaries and not in any obstacle
 def point_valid(x, y, talk=True):
-    if x < 0 or x >= WIDTH:
+    if x < CLEARANCE or x >= WIDTH - CLEARANCE:
         if talk:
             print("X is outside of boundary [0,", WIDTH, "]")
         return False
-    if y < 0 or y > HEIGHT:
+    if y < CLEARANCE or y > HEIGHT - CLEARANCE:
         if talk:
             print("Y is outside of boundary [0,", HEIGHT, "]")
         return False
@@ -361,7 +361,7 @@ def get_points_in_line(x1, y1, x2, y2):
 
 if __name__ == "__main__":
     #start, target = get_initial_conditions(False)
-    start = Node(10, 10, None)
+    start = Node(16, 16, None)
     target = Node(250, 250, None)
     print("Finding path...")
     real_time = True

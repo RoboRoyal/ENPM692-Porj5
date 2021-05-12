@@ -1,115 +1,61 @@
-#!/usr/bin/env python
 
-import time
-
-time.sleep(6) # wait for everything to load
-
-import rospy
-rospy.loginfo("Im Alive!")
+#Dakota Abernathy
+#ENPM692-Proj5
 
 import math
-import tf
-from geometry_msgs.msg import Twist, Point
-# from nav_msgs.msg import Odometry
-from tf.transformations import euler_from_quaternion
-try:
-    from queue import PriorityQueue
-except ImportError:
-    from Queue import PriorityQueue
-
+import pygame
+import time
 import random
 from random import randint
-
-
-
-rospy.init_node("move_robot")
-pub = rospy.Publisher("cmd_vel", Twist, queue_size=5)
-velocity_msg = Twist()
-rate = rospy.Rate(10)
-tf_listener = tf.TransformListener()
-
-odom_frame = 'odom'
-base_frame = 'base_footprint'
-try:
-    tf_listener.waitForTransform(odom_frame, 'base_footprint', rospy.Time(), rospy.Duration(1.0))
-    base_frame = 'base_footprint'
-except (tf.Exception, tf.ConnectivityException, tf.LookupException):
-    try:
-        tf_listener.waitForTransform(odom_frame, 'base_link', rospy.Time(), rospy.Duration(1.0))
-        base_frame = 'base_link'
-    except (tf.Exception, tf.ConnectivityException, tf.LookupException):
-        rospy.loginfo("Cannot find transform between odom and base_link or base_footprint")
-        rospy.signal_shutdown("tf Exception")
-
 random.seed(1234)
-
-# global vars not used for set-up
-robot_move_speed = .25
-robot_turn_speed = .4
-goal_threshold = .5
-angular_threshold = 0.02
-POINT_THRESH = .16
 
 GRAIN = 30
 HEIGHT = 10 * GRAIN
 WIDTH = 10 * GRAIN
+SCALE = 2
+SCALAR = GRAIN * SCALE
 
+board = None
+start = None
+target = None
+real_time = False
 
-BOT_RADIUS = 10
-OBSTACLE_CLEARANCE = 5
-CLEARANCE = BOT_RADIUS + OBSTACLE_CLEARANCE
-THRESHOLD = 20
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0, 255)
+GREEN = (0, 255, 0)
+RED = (255, 0, 0)
+CYAN = (0, 255, 255)
+MAGENTA = (255, 0, 255)
+YELLOW = (255, 255, 0)
+
 nodes_visited = []
+all_nodes = None
 path = []
 SQRT2 = math.sqrt(2)
 nodes = None
-found_path = True
 MAX_SEPARATION = 30
 
+BOT_RADIUS = 10
+OBSTACLE_CLEARANCE = 10
+CLEARANCE = BOT_RADIUS + OBSTACLE_CLEARANCE
 
+THRESHOLD = 20
+itt = 0
 SLOW = False
 
-# Returns position of bot according to odometry data
-def get_odom_data():
-    try:
-        (trans, rot) = tf_listener.lookupTransform(odom_frame, base_frame, rospy.Time(0))
-        rotation = euler_from_quaternion(rot)
-    except (tf.Exception, tf.ConnectivityException, tf.LookupException):
-        rospy.loginfo("TF Exception. (I can only assume that means 'The F@ck is this Exception')")
-        return
 
-    return Point(*trans), rotation[2]
-
-
-
-# converts degrees to bot radians
-def angle_to_dir(ang):
-    if ang <= 180:
-        return ang * math.pi / 180
-    return -1 * (360 - ang) * math.pi / 180
-
-# stop all motion in bot
-def stop():
-    velocity_msg.linear.x = 0.0
-    velocity_msg.angular.z = 0.0
-    pub.publish(velocity_msg)
-    rate.sleep()
-    pub.publish(velocity_msg)
-    rate.sleep()
-    time.sleep(.15)
-
-
-
-# ----------------------------------
+def update(node):
+    global itt
+    draw_node(node)
+    if itt % 5 == 0:
+        pygame.display.update()
+        pygame.event.get()
+    itt += 1
 
 
 # distance between two points
-def distance(x1, y1, x2, y2):
+def distance(x1,y1,x2,y2):
     return math.sqrt(pow((x2-x1), 2)+pow((y2-y1), 2))
-
-
-def round_to_n(num, n=3):
-    return n * round(num / n)
 
 
 # class to keep track of each place visited
@@ -139,6 +85,29 @@ class Node:
 
     def __lt__(self, other):
         return self.path_length < other.path_length
+
+def draw_node(node, color=CYAN):
+    pygame.draw.line(board, color, [node.x * SCALE, (HEIGHT - node.y) * SCALE],
+                     [node.parent.x * SCALE, (HEIGHT - node.parent.y) * SCALE], SCALE)
+
+# makes default board
+def make_board():
+    global board
+    pygame.init()
+    board = pygame.display.set_mode((int(WIDTH * SCALE), int(HEIGHT * SCALE)))
+    pygame.display.set_caption("Path finding algorithm")
+    board.fill(WHITE)
+
+    # easy
+    pygame.draw.circle(board, BLACK, [2 * SCALAR, (HEIGHT - 2 * GRAIN) * SCALE], 1 * SCALAR)
+    pygame.draw.circle(board, BLACK, [2 * SCALAR, (HEIGHT - 8 * GRAIN) * SCALE], 1 * SCALAR)
+    pygame.draw.rect(board, BLACK, pygame.Rect(
+        .25 * SCALAR, (HEIGHT - 5.75 * GRAIN) * SCALE, 1.5 * SCALAR, 1.5 * SCALAR))
+    pygame.draw.rect(board, BLACK, pygame.Rect(
+        3.75 * SCALAR, (HEIGHT - 5.75 * GRAIN) * SCALE, 2.5 * SCALAR, 1.5 * SCALAR))
+    pygame.draw.rect(board, BLACK, pygame.Rect(
+        7.25 * SCALAR, (HEIGHT - 4 * GRAIN) * SCALE, 1.5 * SCALAR, 2 * SCALAR))
+
 
 def in_circle(x, y):  # check if point in lower circle
     if math.pow(x - 2 * GRAIN, 2) + math.pow(y - (HEIGHT - 2 * GRAIN), 2) >= math.pow(1 * GRAIN + CLEARANCE, 2):
@@ -198,90 +167,36 @@ def point_valid(x, y, talk=True):
         return False
     return True
 
-# work back from target to get path to start
-def back_track(end_node):
-    n = end_node
-    while n:
-        path.append(n)
-        n = n.parent
-    path.reverse()
 
-# determines if the bot should spin left or right to turn towards specified goal
-def left_spin(start, end):
-    if (start >= 0) == (end >= 0):
-        return start < end
-    if (start >= 0) and (end <= 0):
-        return abs(start - end) > math.pi
+# gets single valid point from user
+def get_point_from_user(word):
+    valid = False
+    while not valid:
+        x = int(input("Enter the X coordinate of the "+word+" point: "))
+        y = int(input("Enter the Y coordinate of the " + word + " point: "))
+        valid = point_valid(x, y, True)
+    return x, y
+
+
+# get single valid random point
+def random_point():
+    valid = False
+    while not valid:
+        x = randint(0, WIDTH)
+        y = randint(0, HEIGHT)
+        valid = point_valid(x, y, False)
+    return x, y
+
+
+# gets valid start and target point
+def get_initial_conditions(human=True):
+    if human:
+        x1, y1 = get_point_from_user("start")
+        x2, y2 = get_point_from_user("target")
     else:
-        return abs(start - end) < math.pi
-    return True
-
-
-# returns the difference in angle between the two given orientations
-def get_diff(rot1, rot2):
-    if (rot1 >= 0) == (rot2 >= 0):
-        return abs(rot1) - abs(rot2)
-    tmp = abs(rot1) + abs(rot2)
-    if tmp > math.pi:
-        return 2 * math.pi - tmp
-    return tmp
-
-
-# turns bot in direction of the specifies orientation
-def turn(direction):
-    blank, rot = get_odom_data()
-    while angular_threshold < abs(get_diff(rot, direction)):
-        turn_speed = robot_turn_speed
-        if abs(get_diff(rot, direction)) < .2:
-            turn_speed = robot_turn_speed / 4
-        if abs(get_diff(rot, direction)) < .05:
-            turn_speed = robot_turn_speed / 8
-
-        if left_spin(rot, direction):
-            velocity_msg.angular.z = turn_speed
-        else:
-            velocity_msg.angular.z = -turn_speed
-
-        pub.publish(velocity_msg)
-        rate.sleep()
-        blank, rot = get_odom_data()
-    velocity_msg.angular.z = 0
-    pub.publish(velocity_msg)
-    # stop()
-
-
-def navigate(target):
-    position, rot = get_odom_data()
-    x = position.x + 5
-    y = position.y + 5
-    end_x = float(target.x) / GRAIN
-    end_y = float(target.y) / GRAIN
-    print(x, y, end_x, end_y)
-    if distance(x, y, end_x, end_y) < POINT_THRESH / 2:
-        print("Already there: ", distance(x, y, end_x, end_y))
-        return
-    direction = math.atan2(end_y - y, end_x - x)
-    if abs(direction - rot) > angular_threshold:
-        turn(direction)
-    position, rot = get_odom_data()
-    x = position.x + 5
-    y = position.y + 5
-    rospy.loginfo("Distance to next: " + str(distance(x, y, end_x, end_y)))
-    last = distance(x, y, end_x, end_y)
-    while distance(x, y, end_x, end_y) > POINT_THRESH and distance(x, y, end_x, end_y) <= last:
-        last = distance(x, y, end_x, end_y)
-        velocity_msg.linear.x = robot_move_speed
-        velocity_msg.angular.z = 0
-        pub.publish(velocity_msg)
-        rate.sleep()
-        position, rot = get_odom_data()
-        x = position.x + 5
-        y = position.y + 5
-        rospy.loginfo("Distance to next: " + str(distance(x, y, end_x, end_y)))
-    stop()
-
-
-######################## HYBRID RRT ###################################
+        x1, y1 = random_point()
+        x2, y2 = random_point()
+    return Node(x1, y1, None), Node(x2, y2, None)
 
 
 def valid_line(x1,y1,x2,y2):
@@ -291,7 +206,7 @@ def valid_line(x1,y1,x2,y2):
     return True
 
 
-def closest_point(x, y):
+def closest_point(x,y):
     min_distance = 1000000
     closest = start
     for node in nodes_visited:
@@ -309,8 +224,9 @@ def RRT(start, goal):
         parent = closest_point(x,y)
         if not valid_line(x, y, parent.x, parent.y) or distance(x, y, parent.x, parent.y) > MAX_SEPARATION:
             continue
-        new_node = Node(x, y, parent)
+        new_node = Node(x,y, parent)
         nodes_visited.append(new_node)
+        update(new_node)
         if is_close(new_node.x, new_node.y, goal.x, goal.y):
             goal.parent = new_node
             return True
@@ -326,13 +242,19 @@ def duel_rrt(start, goal):
     RRT(start, goal)
     back_track(nodes_visited[-1])
     s_g = path
-    all_nodes = list(nodes_visited) #.copy()
+    all_nodes = nodes_visited.copy()
     reset_rrt(start, goal)
+    make_board()
+    add_points()
+    draw_path(s_g, RED)
     print("Done first RRT: Start to Goal")
     path = []
     RRT(goal, start)
     back_track(nodes_visited[-1])
     g_s = path
+    make_board()
+    add_points()
+    draw_path(g_s, GREEN)
     print("Done second RRT: Goal to Start")
     for n in nodes_visited:
         all_nodes.append(n)
@@ -340,14 +262,14 @@ def duel_rrt(start, goal):
 
 def optimise(s_g):
     for i in range(0, len(s_g) - 1):
-        for j in range(len(s_g) - 1, i + 2, -1):
-            if j >= len(s_g):
-                continue
-            if valid_line(s_g[i].x, s_g[i].y, s_g[j].x, s_g[j].y):
-                s_g[j].parent = s_g[i]
-                for p in range(j - i - 1):
-                    s_g.pop(i + 1)
-                return s_g
+            for j in range(len(s_g) - 1, i + 2, -1):
+                if j >= len(s_g):
+                    continue
+                if valid_line(s_g[i].x, s_g[i].y, s_g[j].x, s_g[j].y):
+                    s_g[j].parent = s_g[i]
+                    for p in range(j - i - 1):
+                        s_g.pop(i + 1)
+                    return s_g
     return s_g
 
 def full_optimise(s_g):
@@ -370,10 +292,12 @@ def hybrid_rrt(start, goal):
     s_g, g_s, all_nodes = duel_rrt(start, goal)
     print("Optimise S to G")
     s_g = full_optimise(s_g)
+    draw_path(s_g, YELLOW)
     if SLOW:
         time.sleep(1)
     print("Optimise G to S")
     g_s = full_optimise(g_s)
+    draw_path(g_s, MAGENTA)
     if SLOW:
         time.sleep(1)
     if path_length(s_g) < path_length(g_s):
@@ -382,9 +306,46 @@ def hybrid_rrt(start, goal):
     else:
         print("g_s")
         path = g_s
+    draw_path(path, BLACK)
     if SLOW:
         time.sleep(1.5)
     return path
+
+# work back from target to get path to start
+def back_track(end_node):
+    n = end_node
+    while n:
+        path.append(n)
+        n = n.parent
+    path.reverse()
+
+# draws a single point with a threshold area around it
+def draw_point_with_threshold(point, color=GREEN):
+    pygame.draw.circle(board, color, [point.x * SCALE, (HEIGHT - point.y) * SCALE], THRESHOLD * SCALE)
+
+def draw_path(p = path, color = RED):
+    for n in p:
+        if n and n.parent:
+            draw_node(n, color)
+        pygame.display.update()
+        pygame.event.get()
+        if SLOW:
+            time.sleep(.05)
+# adds all visited nodes, the path, start and end points to board
+def add_points(p = path):
+    # print("Visited: ", len(nodes_visited))
+
+    draw_point_with_threshold(start)
+    draw_point_with_threshold(target, RED)
+    pygame.display.update()
+
+    draw_path(p, MAGENTA)
+    pygame.display.update()
+    # print("Path: ", len(p))
+
+    if SLOW:
+        time.sleep(1.5)
+
 
 def get_points_in_line(x1, y1, x2, y2):
     points = []
@@ -396,68 +357,45 @@ def get_points_in_line(x1, y1, x2, y2):
                 points.append([x, y])
     return points
 
+def sanity_check():
+    for run in range(1000):
+        point = random_point()
+        if point_valid(point[0], point[1]):
+            pygame.draw.circle(board, RED, (point[0] * SCALE, HEIGHT * SCALE - point[1] * SCALE), 1)
+        else:
+            pass
+            #pygame.draw.circle(board, GREEN, point, 1)
+        pygame.display.update(     )
+        pygame.event.get()
 
-# get single valid random point
-def random_point():
-    valid = False
-    while not valid:
-        x = randint(0, WIDTH)
-        y = randint(0, HEIGHT)
-        valid = point_valid(x, y, False)
-    return x, y
 
-############################## END OF HYBRID RRT ##############################################
-
-def conver_from_odom(x, y):
-    x = (x + 5) * GRAIN
-    y = (y + 5) * GRAIN
-    return int(x), int(y)
-
-# initiator of all my problems
 if __name__ == "__main__":
-    rospy.loginfo("Beep-Boop, here we go again")
-    start_time = time.time()
-    rospy.loginfo("I've got em in my sights!")
-    rospy.loginfo(get_odom_data())
-
-
-    start = Node(4 * GRAIN, 2 * GRAIN)
-    target = Node(9 * GRAIN, HEIGHT - 1 * GRAIN)
-
-    real_x, real_y = conver_from_odom(get_odom_data()[0].x, get_odom_data()[0].y)
-    start = Node(real_x, real_y)
-    if distance(start.x, start.y, real_x, real_y) > POINT_THRESH:
-        print("ERROR!!!!! Bot not in right spot")
-        print(distance(start.x, start.y, real_x, real_y))
-
+    #start, target = get_initial_conditions(False)
+    start = Node(4 * GRAIN, 1 * GRAIN, None)
+    target = Node(9 * GRAIN, HEIGHT - 1 * GRAIN, None)
+    print("Finding path...")
+    real_time = True
+    print(start, target)
+    if real_time:
+        make_board()
+        add_points()
+    #pygame.draw.circle(board, MAGENTA, (89, HEIGHT - (106 * SCALE)), 3)
+    #pygame.display.update()
+    # sanity_check()
+    # RRT(start, target)
+    # duel_rrt(start, target)
+    print("Path: ")
     path = hybrid_rrt(start, target)
-    # path = [Node(270, 270),  Node(100, 100), Node(120, 80), Node(120, 60)]
-    # path is now a list of nodes
-    if distance(start.x, start.y, path[0].x, path[0].y) > distance(start.x, start.y, path[-1].x, path[-1].y):
-        print("reversing path")
-        path.reverse()
-    rospy.loginfo("Path has " + str(len(path)) + " nodes")
-    num = 0
-    print("Start: ")
-    print(start)
-    print("End: ")
-    print(target)
-    for node in path:
-        print(node.x, node.y)
-
-    if len(path) == 1:
-        print("No go")
-        SystemExit()
-
-    for node in path:
-        rospy.loginfo(str(num))
-        print(node.x, node.y)
-        num += 1
-        # go from one node to the next
-        navigate(node)
-
-    print("Goal reached")
-    stop()
-    end_time = time.time()
-    rospy.loginfo("Time to complete: {:.4} seconds. Not that its a race or anything....".format(end_time-start_time))
-
+    for i in path:
+        print(i)
+    print("found")
+    make_board()
+    add_points(path)
+    pygame.display.update()
+    print("Done")
+    for i in range(501):
+        time.sleep(0.1)
+        events = pygame.event.get()
+        for event in events:
+            if event.type == pygame.QUIT:
+                raise SystemExit
